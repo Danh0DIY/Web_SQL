@@ -1,8 +1,10 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, redirect, session
 import mysql.connector
 import os
+import bcrypt
 
 app = Flask(__name__)
+app.secret_key = "secret_key_tau"  # đổi cũng được
 
 def get_db_connection():
     return mysql.connector.connect(
@@ -13,24 +15,54 @@ def get_db_connection():
         port=int(os.environ.get("DB_PORT"))
     )
 
-@app.route("/", methods=["GET", "POST"])
-def index():
+@app.route("/")
+def home():
+    return redirect("/login")
+
+# ---------- LOGIN ----------
+@app.route("/login", methods=["GET", "POST"])
+def login():
     if request.method == "POST":
-        content = request.form["content"]
+        username = request.form["username"]
+        password = request.form["password"].encode()
 
         conn = get_db_connection()
-        cursor = conn.cursor()
+        cursor = conn.cursor(dictionary=True)
         cursor.execute(
-            "INSERT INTO test_data (content) VALUES (%s)",
-            (content,)
+            "SELECT * FROM users WHERE username = %s",
+            (username,)
         )
-        conn.commit()
+        user = cursor.fetchone()
         cursor.close()
         conn.close()
 
-        return "✅ Đã lưu dữ liệu vào MySQL Railway"
+        if user and bcrypt.checkpw(password, user["password"].encode()):
+            session["user"] = user["username"]
+            session["role"] = user["role"]
+            return redirect("/admin")
 
-    return render_template("index.html")
+        return "❌ Sai tài khoản hoặc mật khẩu"
+
+    return render_template("login.html")
+
+# ---------- ADMIN ----------
+@app.route("/admin")
+def admin():
+    if "user" not in session or session["role"] != "admin":
+        return redirect("/login")
+
+    return render_template("admin.html", user=session["user"])
+
+# ---------- LOGOUT ----------
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/login")
+
+# ---------- PING ----------
+@app.route("/ping")
+def ping():
+    return "OK"
 
 if __name__ == "__main__":
     app.run()
